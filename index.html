@@ -130,11 +130,67 @@
         .verdict-btn.fake {
             background: linear-gradient(45deg, #ff6348, #ff4757);
         }
-        .stats {
-            display: flex;
-            justify-content: space-around;
-            margin: 20px 0;
-            font-size: 14px;
+        .verdict-btn.fake:hover {
+            background-color: #ff4d4d;
+        }
+
+        /* 移动端响应式布局 */
+        @media (max-width: 768px) {
+            body {
+                padding: 5px;
+                height: 100vh;
+                overflow: hidden; /* 防止body本身滚动 */
+            }
+            .container {
+                height: 100%;
+                padding: 10px;
+                display: flex;
+                flex-direction: column;
+                box-sizing: border-box; 
+            }
+            .header {
+                margin-bottom: 15px;
+                padding-bottom: 15px;
+            }
+            .header h1 {
+                font-size: 1.5em;
+            }
+
+            /* 1. 修复游戏种子栏错乱问题 */
+            .seed-input {
+                flex-wrap: wrap; 
+                gap: 8px;
+            }
+            .seed-input input {
+                flex-grow: 1;
+                flex-basis: 200px;
+            }
+            .seed-input button {
+                flex-grow: 1;
+                flex-basis: 100px;
+            }
+
+            /* 2. 实现单页全内容，核心是让聊天区自适应高度 */
+            .chat-area {
+                flex-grow: 1; /* 占据所有可用的剩余垂直空间 */
+                height: auto; /* 覆盖桌面的固定高度 */
+                min-height: 100px; 
+                margin-bottom: 10px;
+            }
+
+            .stats, .input-area, .controls {
+                margin-bottom: 10px;
+                flex-shrink: 0; 
+            }
+            
+            .controls {
+                display: flex;
+                gap: 10px;
+            }
+            .verdict-btn {
+                flex-grow: 1; 
+                padding: 12px 5px;
+            }
         }
     </style>
 </head>
@@ -142,7 +198,7 @@
     <div class="container">
         <div class="header">
             <h1>🕵️ 伪人审讯</h1>
-            <p>HumanOrNot - 纯净体验版</p>
+            <p>HumanOrNot</p>
         </div>
 
         <div class="seed-input">
@@ -188,7 +244,7 @@
         
         // 固定的API配置，用于"打开即玩"模式
         const apiConfig = {
-            model: 'gemini-2.5-flash', // 默认模型
+            model: 'gemini-1.5-flash-latest', // 默认模型
         };
 
         // 预设案件库
@@ -294,7 +350,7 @@
                 <p><strong>难度等级:</strong> ${'★'.repeat(currentCase.difficulty)}</p>
                 <p><strong>任务:</strong> 通过对话判断此人是真人还是AI伪装的伪人</p>
             `;
-            document.getElementById('caseInfo').style.display = 'block';
+            // document.getElementById('caseInfo').style.display = 'block'; // 根据用户要求，不再显示案件信息框，以最大化聊天区域
             
             const chatArea = document.getElementById('chatArea');
             chatArea.innerHTML = '';
