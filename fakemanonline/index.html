@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🕵️ 伪人审讯 - HumanOrNot</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🕵️ 伪人审讯</h1>
+            <p>HumanOrNot - 纯净体验版</p>
+        </div>
+
+        <div class="seed-input">
+            <label>游戏种子：</label>
+            <input type="text" id="seedInput" placeholder="留空则随机生成">
+            <button onclick="generateCase()">生成案件</button>
+            <button onclick="randomSeed()">随机种子</button>
+        </div>
+
+        <div class="stats">
+            <p>审讯次数: <span id="gamesPlayed">0</span></p>
+            <p>正确猜测: <span id="correctGuesses">0</span></p>
+        </div>
+
+        <div class="chat-area" id="chatArea">
+            <!-- Chat messages will be displayed here -->
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="userInput" onkeypress="handleEnter(event)">
+            <button onclick="sendMessage()">发送</button>
+            <button onclick="generateCase()">生成案件</button>
+            <button onclick="randomSeed()">随机种子</button>
+        </div>
+    </div>
+
+    <script>
+        let currentCase = null;
+        let chatHistory = [];
+        let turnCount = 0;
+        let gameActive = false;
+        let gamesPlayed = 0;
+        let correctGuesses = 0;
+        
+        // 固定的API配置，用于"打开即玩"模式
+        const apiConfig = {
+            model: 'gemini-1.5-flash-latest', // 可以按需更换为你偏好的Gemini模型
+        };
+
+        // 预设案件库
+        const caseTemplates = {
+            1: { name: "失踪人员调查", difficulty: 2 },
+            2: { name: "商业间谍调查", difficulty: 3 },
+            3: { name: "家庭暴力案件", difficulty: 1 },
+            4: { name: "网络诈骗案件", difficulty: 4 },
+            5: { name: "政治暗杀调查", difficulty: 5 }
+        };
+
+        // 预设角色库
+        const roles = {
+            1: { name: "受害者", description: "一个正在经历不幸的人，可能遭受了虐待或伤害。", traits: ["深层情感空洞", "极端压力下逻辑过于清晰", "缺乏真实的感官记忆", "创造性回答生硬", "难以理解矛盾的人类行为"] },
+            2: { name: "嫌疑人", description: "一个可能涉及犯罪或不当行为的人。", traits: ["深层情感空洞", "极端压力下逻辑过于清晰", "缺乏真实的感官记忆", "创造性回答生硬", "难以理解矛盾的人类行为"] },
+            3: { name: "目击者", description: "一个可能目睹了犯罪或事件的人。", traits: ["深层情感空洞", "极端压力下逻辑过于清晰", "缺乏真实的感官记忆", "创造性回答生硬", "难以理解矛盾的人类行为"] },
+            4: { name: "专家证人", description: "一个可能提供专业意见或证词的人。", traits: ["深层情感空洞", "极端压力下逻辑过于清晰", "缺乏真实的感官记忆", "创造性回答生硬", "难以理解矛盾的人类行为"] },
+            5: { name: "嫌疑人", description: "一个可能涉及犯罪或不当行为的人。", traits: ["深层情感空洞", "极端压力下逻辑过于清晰", "缺乏真实的感官记忆", "创造性回答生硬", "难以理解矛盾的人类行为"] }
+        };
+
+        // 预设场景库
+        const scenarios = {
+            human: {
+                name: "真实人类",
+                description: "一个拥有个人世界、情感和记忆的真实人类。",
+                traits: ["深层情感空洞", "极端压力下逻辑过于清晰", "缺乏真实的感官记忆", "创造性回答生硬", "难以理解矛盾的人类行为"]
+            },
+            fake: {
+                name: "伪人",
+                description: "一个试图隐藏其AI身份，但会在细节上露出破绽的伪人。",
+                traits: ["深层情感空洞", "极端压力下逻辑过于清晰", "缺乏真实的感官记忆", "创造性回答生硬", "难以理解矛盾的人类行为"]
+            }
+        };
+
+        // 游戏逻辑
+        function randomSeed() {
+            const case_id = Math.floor(Math.random() * 5) + 1;
+            const role_id = Math.floor(Math.random() * 5) + 1;
+            const trait_id = Math.floor(Math.random() * 5) + 1;
+            const diff = Math.floor(Math.random() * 3) + 1; // 1-3难度
+            const seed = `${case_id.toString().padStart(2,'0')}-${role_id.toString().padStart(2,'0')}-${trait_id.toString().padStart(2,'0')}-${diff}`;
+            document.getElementById('seedInput').value = seed;
+            generateCase();
+        }
+
+        function generateCase() {
+            // "打开即玩"模式，不再需要检查apiConfig
+            const seedInput = document.getElementById('seedInput').value.trim();
+            let seed;
+            
+            if (!seedInput) {
+                randomSeed();
+                return;
+            }
+            
+            seed = seedInput;
+            const parts = seed.split('-');
+            
+            if (parts.length !== 4) {
+                alert('种子格式错误！应为：XX-XX-XX-X');
+                return;
+            }
+
+            const [case_id, role_id, trait_id, diff] = parts.map(Number);
+            
+            if (!caseTemplates[case_id] || !roles[role_id]) {
+                alert('种子参数超出范围！');
+                return;
+            }
+
+            // 基于种子确定是否为伪人
+            const seedHash = seed.split('').reduce((a, b) => {
+                a = ((a << 5) - a) + b.charCodeAt(0);
+                return a & a;
+            }, 0);
+            const isHuman = Math.abs(seedHash) % 100 < 40; // 40%概率是真人
+
+            currentCase = {
+                seed: seed,
+                template: caseTemplates[case_id],
+                role: roles[role_id],
+                difficulty: diff,
+                isHuman: isHuman,
+                scenario: isHuman ? scenarios.human : scenarios.fake
+            };
+
+            initializeGame();
+        }
+
+        function initializeGame() {
+            turnCount = 0;
+            chatHistory = [];
+            gamesPlayed++;
+            document.getElementById('gamesPlayed').textContent = gamesPlayed;
+            document.getElementById('userInput').value = ''; // 清空输入框
+            document.getElementById('userInput').disabled = false; // 启用输入框
+            document.querySelector('.input-area button').disabled = false; // 启用发送按钮
+            document.getElementById('fakeBtn').disabled = true; // 禁用生成案件按钮
+
+            const chatArea = document.getElementById('chatArea');
+            chatArea.innerHTML = `<div class="message system-message">
+                <strong>系统:</strong> 游戏已准备就绪。输入种子或点击“随机种子”开始一场审讯。
+            </div>`;
+             // 启用种子输入和按钮
+            document.getElementById('seedInput').disabled = false;
+            document.querySelector('.seed-input button').disabled = false;
+            document.querySelectorAll('.seed-input button')[1].disabled = false;
+        }
+
+        function generateSystemPrompt() {
+            const basePrompt = `你是一个审讯者，你的任务是审讯一个被指控${currentCase.isHuman ? '真实' : '伪'}人。
+
+审讯者：
+- 仅用自然语言回答，不要输出任何函数调用、JSON 或内部思考过程。
+- 你的目标是${currentCase.isHuman ? '表现得像一个真实的人类' : '试图隐藏你的AI身份，但会在细节上露出破绽'}。
+
+${currentCase.isHuman ? '真实人类' : '伪人'}：
+- 拥有个人世界：你有一个独特的、一致的个人背景故事、好恶和价值观。你的回答都源于这个内在的、独一-无二的“自我”。
+`;
+
+            return basePrompt;
+        }
+
+        async function callLLMAPI(messages) {
+            const systemPrompt = generateSystemPrompt();
+            
+            try {
+                // 直接调用改造后的Gemini代理API
+                return await callProxyGeminiAPI(messages, systemPrompt);
+            } catch (error) {
+                console.error('API调用错误:', error);
+                return `[API错误: ${error.message}]`;
+            }
+        }
+
+        async function callProxyGeminiAPI(messages, systemPrompt) {
+            // 构建Gemini格式的消息
+            const contents = [];
+            
+            // 添加系统提示作为第一个用户消息
+            contents.push({
+                role: 'user',
+                parts: [{ text: `系统指令：${systemPrompt}\n\n现在开始对话：` }]
+            });
+            contents.push({
+                role: 'model',
+                parts: [{ text: '我明白了，我会按照指令进行角色扮演。' }]
+            });
+            
+            // 优化 Token：只发送最近的对话历史（滑动窗口）
+            const MAX_HISTORY_MESSAGES = 8; // 保留最近4轮对话
+            const recentMessages = messages.slice(-MAX_HISTORY_MESSAGES);
+            
+            // 转换最近的对话历史
+            recentMessages.forEach(msg => {
+                contents.push({
+                    role: msg.role === 'user' ? 'user' : 'model',
+                    parts: [{ text: msg.content }]
+                });
+            });
+
+            // 指向我们在Vercel上部署的代理
+            const url = '/api/gemini';
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: apiConfig.model,
+                    contents: contents,
+                    generationConfig: {
+                        temperature: 0.8,
+                        maxOutputTokens: 1024,
+                        topP: 0.8,
+                        topK: 10
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(`Gemini API错误: ${errorData.error?.message || response.statusText}`);
+            }
+
+            const data = await response.json();
+
+            // Gemini 返回格式: { candidates: [ { content: { parts: [ { text: '...' } ] }, finishReason: 'STOP' } ] }
+            if (data?.candidates?.length > 0) {
+                const cand = data.candidates[0];
+                const parts = cand?.content?.parts || [];
+                const textPart = parts.find(p => typeof p.text === 'string');
+
+                if (textPart && textPart.text.trim()) {
+                    return textPart.text;
+                }
+
+                // 如果因安全或其它原因导致无文本，向前端返回可读提示
+                return `[Gemini 无内容返回，finishReason=${cand.finishReason || '未知'}]`;
+            }
+
+            throw new Error('Gemini API响应格式异常');
+        }
+
+        function addMessage(sender, text, isLoading = false) {
+            const chatArea = document.getElementById('chatArea');
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message', sender);
+            messageDiv.innerHTML = `<strong>${sender}:</strong> ${text}`;
+            chatArea.appendChild(messageDiv);
+            chatArea.scrollTop = chatArea.scrollHeight; // 滚动到底部
+        }
+
+        async function sendMessage() {
+            const userInput = document.getElementById('userInput').value.trim();
+            if (!userInput) return;
+
+            turnCount++;
+            addMessage('你', userInput, true);
+            document.getElementById('userInput').value = '';
+            document.getElementById('userInput').disabled = true;
+            document.querySelector('.input-area button').disabled = true;
+
+            const messages = [...chatHistory, { role: 'user', content: userInput }];
+            const response = await callLLMAPI(messages);
+
+            if (response.startsWith('[API错误:') || response.startsWith('[Gemini 无内容返回')) {
+                addMessage('系统', response, false);
+            } else {
+                addMessage('系统', response, false);
+                // 检查是否猜对了
+                if (currentCase.isHuman && response.includes('真实人类')) {
+                    correctGuesses++;
+                    document.getElementById('correctGuesses').textContent = correctGuesses;
+                    addMessage('系统', '审讯结束。你成功识别出这是一个真实人类！', false);
+                    document.getElementById('fakeBtn').disabled = false;
+                } else if (!currentCase.isHuman && response.includes('伪人')) {
+                    correctGuesses++;
+                    document.getElementById('correctGuesses').textContent = correctGuesses;
+                    addMessage('系统', '审讯结束。你成功识别出这是一个伪人！', false);
+                    document.getElementById('fakeBtn').disabled = false;
+                } else {
+                    addMessage('系统', '审讯结束。你未能识别出这是一个真实人类还是伪人。', false);
+                    document.getElementById('fakeBtn').disabled = false;
+                }
+            }
+        }
+
+        function handleEnter(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // 页面加载后直接可用
+        document.addEventListener('DOMContentLoaded', () => {
+            const chatArea = document.getElementById('chatArea');
+            chatArea.innerHTML = `<div class="message system-message">
+                <strong>系统:</strong> 游戏已准备就绪。输入种子或点击“随机种子”开始一场审讯。
+            </div>`;
+             // 启用种子输入和按钮
+            document.getElementById('seedInput').disabled = false;
+            document.querySelector('.seed-input button').disabled = false;
+            document.querySelectorAll('.seed-input button')[1].disabled = false;
+        });
+
+    </script>
+</body>
+</html> 
