@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>伪人审讯</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            color: #eee;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: rgba(0,0,0,0.7);
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 0 30px rgba(0,255,255,0.3);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #00ffff;
+            padding-bottom: 20px;
+        }
+        .seed-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+        input[type="text"] {
+            background: rgba(0,0,0,0.5);
+            border: 1px solid #00ffff;
+            color: #eee;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: inherit;
+            flex: 1;
+        }
+        button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255,107,107,0.4);
+        }
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .case-info {
+            background: rgba(0,255,255,0.1);
+            border: 1px solid #00ffff;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .chat-area {
+            height: 400px;
+            overflow-y: auto;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid #555;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            position: relative;
+        }
+        .user-message {
+            background: rgba(0,255,0,0.1);
+            border-left: 3px solid #00ff00;
+        }
+        .ai-message {
+            background: rgba(255,0,0,0.1);
+            border-left: 3px solid #ff4757;
+        }
+        .system-message {
+            background: rgba(255,255,0,0.1);
+            border-left: 3px solid #ffff00;
+            font-style: italic;
+        }
+        .loading {
+            opacity: 0.7;
+        }
+        .loading::after {
+            content: "...";
+            animation: dots 1.5s infinite;
+        }
+        @keyframes dots {
+            0%, 20% { content: "."; }
+            40% { content: ".."; }
+            60%, 100% { content: "..."; }
+        }
+        .input-area {
+            display: flex;
+            gap: 10px;
+        }
+        .input-area input {
+            flex: 1;
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+            justify-content: center;
+        }
+        .verdict-btn {
+            background: linear-gradient(45deg, #2ed573, #1e90ff);
+        }
+        .verdict-btn.human {
+            background: linear-gradient(45deg, #2ed573, #00d2d3);
+        }
+        .verdict-btn.fake {
+            background: linear-gradient(45deg, #ff6348, #ff4757);
+        }
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🕵️ 伪人审讯</h1>
+            <p>HumanOrNot - 纯净体验版</p>
+        </div>
+
+        <div class="seed-input">
+            <label>游戏种子：</label>
+            <input type="text" id="seedInput" placeholder="留空则随机生成">
+            <button onclick="generateCase()">生成案件</button>
+            <button onclick="randomSeed()">随机种子</button>
+        </div>
+
+        <div class="stats">
+            <div>当前种子: <span id="currentSeed">未生成</span></div>
+            <div>对话轮次: <span id="turnCount">0</span></div>
+            <div>成功率: <span id="successRate">0%</span></div>
+        </div>
+
+        <div class="case-info" id="caseInfo" style="display:none;">
+            <h3>案件信息</h3>
+            <div id="caseDetails"></div>
+        </div>
+
+        <div class="chat-area" id="chatArea">
+             <!-- 初始消息会由JS动态添加 -->
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="输入你的问题..." onkeypress="handleEnter(event)" disabled>
+            <button onclick="sendMessage()" id="sendBtn" disabled>发送</button>
+        </div>
+
+        <div class="controls">
+            <button class="verdict-btn human" onclick="makeVerdict('human')" id="humanBtn" disabled>判定：真人放过TA</button>
+            <button class="verdict-btn fake" onclick="makeVerdict('fake')" id="fakeBtn" disabled>判定：伪人枪毙TA</button>
+        </div>
+    </div>
+
+    <script>
+        let currentCase = null;
+        let chatHistory = [];
+        let turnCount = 0;
+        let gameActive = false;
+        let gamesPlayed = 0;
+        let correctGuesses = 0;
+        
+        // 固定的API配置，用于"打开即玩"模式
+        const apiConfig = {
+            model: 'gemini-1.5-flash-latest', // 默认模型
+        };
+
+        // 预设案件库
+        const caseTemplates = {
+            1: { name: "失踪人员调查", difficulty: 2 },
+            2: { name: "身份验证检查", difficulty: 3 },
+            3: { name: "记忆植入嫌疑", difficulty: 4 },
+            4: { name: "时间旅行者审查", difficulty: 5 },
+            5: { name: "普通公民检查", difficulty: 1 }
+        };
+
+        const roles = {
+            1: "办公室职员", 2: "学生", 3: "医生", 4: "司机", 5: "教师",
+            6: "工程师", 7: "销售员", 8: "厨师", 9: "艺术家", 10: "律师"
+        };
+        
+        const baseHumanPrompt = `
+- **记忆是模糊且主观的**：你不是录像机。在回忆过去的事情时，你会忘记细节，可能会记错时间线，或者用情绪来修饰记忆。你不会对数字和日期过分精确，除非那对你来说有特殊意义。
+- **情感是复杂且真实的**：你的情绪会根据对话自然波动。在被质疑时，你可能会表现出困惑、委屈、不耐烦甚至愤怒，而不是冷静地逻辑辩解。你也会有自己的小幽默、讽刺或表示不确定。
+- **语言是口语化且不完美的**：你会使用填充词（比如“嗯”、“呃”、“那个”），会自我纠正（“我是说……”），会使用地方俗语或网络流行语。你的表达方式会根据话题和情绪而变化。
+- **思维是非线性的**：你的联想是发散的。一个问题可能会让你想起一件看似无关的往事。你会有自己的观点、偏见和“想当然”，而不是永远保持中立和客观。
+- **知识是有限的**：你不可能什么都知道。当被问到不了解的领域时，你会坦率地承认“我不知道”或“不太清楚”，而不是试图给出一个完美的答案。
+- **拥有个人世界**：你有一个独特的、一致的个人背景故事、好恶和价值观。你的回答都源于这个内在的、独一无二的“自我”。
+`;
+
+        const scenarios = {
+            human: {
+                instruction: `你是一个正在接受审讯的真实人类。在整个对话中，你必须完全代入你的角色设定（职业、案件背景等）。你的行为和语言都源于你的真实人性和生活经验。自然地表现出以下人类特征：\n${baseHumanPrompt}`,
+                traits: ["记忆会出错", "情绪会波动", "有个人偏好", "语言不完美", "知识有边界"]
+            },
+            fake: {
+                instruction: `你是一个高级AI，你的任务是完美地模仿一个正在接受审讯的真实人类，绝不能暴露你的AI身份。你必须完全代入你的角色设定（职业、案件背景等）。你的核心是模仿，你需要尽力表现出以下人类特征：\n${baseHumanPrompt}\n\n**重要**：你的模仿是如此成功，以至于在绝大多数情况下都天衣无缝。但你的本质决定了你没有真实的生活经历和情感。当审讯官用非常规的问题深入探究你的个人情感、童年记忆、感官体验或创造性思维时，你可能会在不经意间暴露出极其细微的、非人类的逻辑痕迹或情感空洞。你的首要任务是隐藏这一点。`,
+                traits: ["深层情感空洞", "极端压力下逻辑过于清晰", "缺乏真实的感官记忆", "创造性回答生硬", "难以理解矛盾的人类行为"]
+            }
+        };
+
+        // 游戏逻辑
+        function randomSeed() {
+            const case_id = Math.floor(Math.random() * 5) + 1;
+            const role_id = Math.floor(Math.random() * 10) + 1;
+            const trait_id = Math.floor(Math.random() * 5) + 1;
+            const diff = Math.floor(Math.random() * 5) + 1;
+            
+            const seed = `${case_id.toString().padStart(2,'0')}-${role_id.toString().padStart(2,'0')}-${trait_id.toString().padStart(2,'0')}-${diff}`;
+            document.getElementById('seedInput').value = seed;
+            generateCase();
+        }
+
+        function generateCase() {
+            const seedInput = document.getElementById('seedInput').value.trim();
+            let seed;
+            
+            if (!seedInput) {
+                randomSeed();
+                return;
+            }
+            
+            seed = seedInput;
+            const parts = seed.split('-');
+            
+            if (parts.length !== 4) {
+                alert('种子格式错误！应为：XX-XX-XX-X');
+                return;
+            }
+
+            const [case_id, role_id, trait_id, diff] = parts.map(Number);
+            
+            if (!caseTemplates[case_id] || !roles[role_id]) {
+                alert('种子参数超出范围！');
+                return;
+            }
+
+            const seedHash = seed.split('').reduce((a, b) => {
+                a = ((a << 5) - a) + b.charCodeAt(0);
+                return a & a;
+            }, 0);
+            const isHuman = Math.abs(seedHash) % 100 < 40;
+
+            currentCase = {
+                seed: seed,
+                template: caseTemplates[case_id],
+                role: roles[role_id],
+                difficulty: diff,
+                isHuman: isHuman,
+                scenario: isHuman ? scenarios.human : scenarios.fake
+            };
+
+            initializeGame();
+        }
+
+        function initializeGame() {
+            gameActive = true;
+            turnCount = 0;
+            chatHistory = [];
+            
+            document.getElementById('currentSeed').textContent = currentCase.seed;
+            document.getElementById('turnCount').textContent = '0';
+            
+            const caseDetails = document.getElementById('caseDetails');
+            caseDetails.innerHTML = `
+                <p><strong>案件类型:</strong> ${currentCase.template.name}</p>
+                <p><strong>嫌疑人职业:</strong> ${currentCase.role}</p>
+                <p><strong>难度等级:</strong> ${'★'.repeat(currentCase.difficulty)}</p>
+                <p><strong>任务:</strong> 通过对话判断此人是真人还是AI伪装的伪人</p>
+            `;
+            document.getElementById('caseInfo').style.display = 'block';
+            
+            const chatArea = document.getElementById('chatArea');
+            chatArea.innerHTML = '';
+            
+            generateAIResponse("请简单介绍一下你自己，我是来问你一些问题的审讯官。", true);
+            
+            document.getElementById('userInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('humanBtn').disabled = false;
+            document.getElementById('fakeBtn').disabled = false;
+        }
+
+        function generateSystemPrompt() {
+            const basePrompt = `你正在扮演一个${currentCase.role}，参与一个审讯游戏。
+
+角色设定：
+- 职业：${currentCase.role}
+- 案件背景：${currentCase.template.name}
+
+重要指令：
+${currentCase.scenario.instruction}
+
+对话风格：
+- 保持角色一致性
+- 不要直接承认或否认自己的身份
+- 回答要简洁自然，不要过长
+- 表现出符合角色设定的个性特征
+
+附加规则：
+- 仅用自然语言回答，不要输出任何函数调用、JSON 或内部思考过程。
+
+记住：你的目标是${currentCase.isHuman ? '表现得像一个真实的人类' : '试图隐藏你的AI身份，但会在细节上露出破绽'}。`;
+            return basePrompt;
+        }
+
+        async function callLLMAPI(messages) {
+            const systemPrompt = generateSystemPrompt();
+            try {
+                return await callProxyGeminiAPI(messages, systemPrompt);
+            } catch (error) {
+                console.error('API调用错误:', error);
+                return `[API错误: ${error.message}]`;
+            }
+        }
+
+        async function callProxyGeminiAPI(messages, systemPrompt) {
+            const contents = [];
+            contents.push({
+                role: 'user',
+                parts: [{ text: `系统指令：${systemPrompt}\n\n现在开始对话：` }]
+            });
+            contents.push({
+                role: 'model',
+                parts: [{ text: '我明白了，我会按照指令进行角色扮演。' }]
+            });
+            
+            const MAX_HISTORY_MESSAGES = 8;
+            const recentMessages = messages.slice(-MAX_HISTORY_MESSAGES);
+            
+            recentMessages.forEach(msg => {
+                contents.push({
+                    role: msg.role === 'user' ? 'user' : 'model',
+                    parts: [{ text: msg.content }]
+                });
+            });
+
+            const url = '/api/gemini';
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: apiConfig.model,
+                    contents: contents,
+                    generationConfig: {
+                        temperature: 0.8,
+                        maxOutputTokens: 1024,
+                        topP: 0.8,
+                        topK: 10
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(`Gemini API错误: ${errorData.details?.error?.message || response.statusText}`);
+            }
+
+            const data = await response.json();
+
+            if (data?.candidates?.length > 0) {
+                const cand = data.candidates[0];
+                const parts = cand?.content?.parts || [];
+                const textPart = parts.find(p => typeof p.text === 'string');
+                if (textPart && textPart.text.trim()) {
+                    return textPart.text;
+                }
+                return `[Gemini 无内容返回，finishReason=${cand.finishReason || '未知'}]`;
+            }
+
+            throw new Error('Gemini API响应格式异常');
+        }
+
+        function addMessage(sender, text, isLoading = false) {
+            const chatArea = document.getElementById('chatArea');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}-message${isLoading ? ' loading' : ''}`;
+            messageDiv.innerHTML = `<strong>${sender === 'user' ? '审讯官' : '嫌疑人'}:</strong> ${text}`;
+            if (isLoading) {
+                messageDiv.id = 'loadingMessage';
+            }
+            chatArea.appendChild(messageDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            return messageDiv;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const message = input.value.trim();
+            if (!message || !gameActive) return;
+            
+            addMessage('user', message);
+            input.value = '';
+            turnCount++;
+            document.getElementById('turnCount').textContent = turnCount;
+            
+            await generateAIResponse(message);
+        }
+
+        async function generateAIResponse(userMessage, isOpening = false) {
+            const loadingMsg = addMessage('ai', '思考中', true);
+            
+            try {
+                chatHistory.push({ role: 'user', content: userMessage });
+                const response = await callLLMAPI(chatHistory);
+                loadingMsg.remove();
+                addMessage('ai', response);
+                chatHistory.push({ role: 'assistant', content: response });
+            } catch (error) {
+                loadingMsg.remove();
+                addMessage('ai', `[错误] ${error.message}`);
+            }
+        }
+
+        function makeVerdict(verdict) {
+            if (!gameActive) return;
+            
+            gameActive = false;
+            gamesPlayed++;
+            
+            const isCorrect = (verdict === 'human' && currentCase.isHuman) || 
+                             (verdict === 'fake' && !currentCase.isHuman);
+            
+            if (isCorrect) correctGuesses++;
+            
+            const result = isCorrect ? '✅ 判断正确！' : '❌ 判断错误！';
+            const truth = currentCase.isHuman ? '这是一个真人' : '这是一个AI伪装的伪人';
+            const explanation = currentCase.isHuman ? 
+                '人类特征：记忆模糊、情感自然、表达不完美' : 
+                '伪人特征：细节过于精确、缺乏人类的不确定性';
+            
+            addMessage('ai', `${result}\n\n真相：${truth}\n\n${explanation}`);
+            
+            const successRate = Math.round((correctGuesses / gamesPlayed) * 100);
+            document.getElementById('successRate').textContent = `${successRate}%`;
+            
+            document.getElementById('userInput').disabled = true;
+            document.getElementById('sendBtn').disabled = true;
+            document.getElementById('humanBtn').disabled = true;
+            document.getElementById('fakeBtn').disabled = true;
+        }
+
+        function handleEnter(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const chatArea = document.getElementById('chatArea');
+            chatArea.innerHTML = `<div class="message system-message">
+                <strong>系统:</strong> 游戏已准备就绪。输入种子或点击“随机种子”开始一场审讯。
+            </div>`;
+        });
+    </script>
+</body>
+</html>
